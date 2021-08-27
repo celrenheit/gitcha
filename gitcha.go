@@ -1,6 +1,7 @@
 package gitcha
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,13 @@ func FindFilesExcept(path string, list, ignorePatterns []string) (chan SearchRes
 		return nil, err
 	}
 
+	return FindFilesExceptFS(os.DirFS(path), list, ignorePatterns)
+}
+
+// FindFilesExcept finds files from the root of fsys, excluding any matches in
+// a given set of ignore patterns. It also respects all .gitignores it finds
+// while traversing paths.
+func FindFilesExceptFS(fsys fs.FS, list, ignorePatterns []string) (chan SearchResult, error) {
 	ch := make(chan SearchResult)
 	go func() {
 		defer close(ch)
@@ -81,7 +89,7 @@ func FindFilesExcept(path string, list, ignorePatterns []string) (chan SearchRes
 		var lastGit string
 		var gi *ignore.GitIgnore
 
-		_ = filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+		_ = fs.WalkDir(fsys, ".", func(path string, info fs.DirEntry, err error) error {
 			git, _ := GitRepoForPath(path)
 			if git != "" && git != path {
 				if lastGit != git {
@@ -127,11 +135,16 @@ func FindFilesExcept(path string, list, ignorePatterns []string) (chan SearchRes
 				}
 
 				if matched {
-					res, err := filepath.Abs(path)
+					fi, err := fs.Stat(fsys, path)
+					if err != nil {
+						return err
+					}
+
+					res, err := filepath.Abs(fi.Name())
 					if err == nil {
 						ch <- SearchResult{
 							Path: res,
-							Info: info,
+							Info: fi,
 						}
 					}
 
